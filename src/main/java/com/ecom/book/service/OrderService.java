@@ -1,0 +1,88 @@
+package com.ecom.book.service;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.ecom.book.dto.OrderItemResponse;
+import com.ecom.book.dto.OrderRequest;
+import com.ecom.book.dto.OrderResponse;
+import com.ecom.book.entity.Order;
+import com.ecom.book.entity.OrderItem;
+import com.ecom.book.repository.OrderRepository;
+import com.ecom.book.util.OrderStatus;
+
+import lombok.RequiredArgsConstructor;
+
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private final OrderRepository orderRepository;
+    
+    @Transactional
+    public OrderResponse createOrder(OrderRequest request) {
+        Order booking = new Order();
+        booking.setUsername("vitthal");
+        booking.setTotalAmount(request.totalAmount());
+        booking.setStatus(OrderStatus.CONFIRMED);
+        booking.setCreatedAt(LocalDateTime.now());
+
+        List<OrderItem> items = request.items().stream().map(itemDto -> {
+            OrderItem item = new OrderItem();
+            item.setProductId(itemDto.productId());
+            item.setVariantId(itemDto.variantId());
+            item.setProductName(itemDto.productName());
+            item.setSize(itemDto.size());
+            item.setColor(itemDto.color());
+            item.setQuantity(itemDto.quantity());
+            item.setPriceAtBooking(itemDto.priceAtBooking());
+            return item;
+        }).collect(Collectors.toList());
+
+        booking.getItems().addAll(items);
+        
+        Order savedBooking = orderRepository.save(booking);
+
+        return mapToResponse(savedBooking);
+    }
+
+    public OrderResponse getOrderById(Long bookingId) {
+    	Optional<Order> byId = orderRepository.findById(bookingId);
+        return orderRepository.findById(bookingId)
+        		.map(this::mapToResponse)
+                .orElseThrow(() -> new RuntimeException("Booking not found with id: " + bookingId));
+    }
+
+    public List<OrderResponse> getOrdersByUsername() {
+        return orderRepository.findByUsername("vitthal").stream().map(this::mapToResponse).toList();
+    }
+    
+    private OrderResponse mapToResponse(Order booking) {
+        List<OrderItemResponse> itemResponses = booking.getItems().stream()
+            .map(item -> new OrderItemResponse(
+                item.getOrderItemId(),
+                item.getProductId(),
+                item.getVariantId(),
+                item.getProductName(),
+                item.getSize(),
+                item.getColor(),
+                item.getQuantity(),
+                item.getPriceAtBooking()
+            ))
+            .collect(Collectors.toList());
+
+        return new OrderResponse(
+            booking.getOrderId(),
+            booking.getUsername(),
+            booking.getStatus(),
+            booking.getTotalAmount(),
+            booking.getCreatedAt(),
+            itemResponses
+        );
+    }
+}
