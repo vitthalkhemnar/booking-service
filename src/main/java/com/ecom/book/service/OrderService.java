@@ -1,8 +1,8 @@
 package com.ecom.book.service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -14,6 +14,7 @@ import com.ecom.book.dto.OrderResponse;
 import com.ecom.book.entity.Order;
 import com.ecom.book.entity.OrderItem;
 import com.ecom.book.repository.OrderRepository;
+import com.ecom.book.util.CommonUtil;
 import com.ecom.book.util.OrderStatus;
 
 import lombok.RequiredArgsConstructor;
@@ -25,12 +26,14 @@ public class OrderService {
     private final OrderRepository orderRepository;
     
     @Transactional
-    public OrderResponse createOrder(OrderRequest request) {
+    public OrderResponse createOrder(OrderRequest request) {    	
         Order booking = new Order();
-        booking.setUsername("vitthal");
         booking.setTotalAmount(request.totalAmount());
         booking.setStatus(OrderStatus.CONFIRMED);
         booking.setCreatedAt(LocalDateTime.now());
+        
+		String username = CommonUtil.getCurrentUsername();
+        booking.setUsername(username);
 
         List<OrderItem> items = request.items().stream().map(itemDto -> {
             OrderItem item = new OrderItem();
@@ -52,14 +55,16 @@ public class OrderService {
     }
 
     public OrderResponse getOrderById(Long bookingId) {
-    	Optional<Order> byId = orderRepository.findById(bookingId);
         return orderRepository.findById(bookingId)
         		.map(this::mapToResponse)
                 .orElseThrow(() -> new RuntimeException("Booking not found with id: " + bookingId));
     }
 
     public List<OrderResponse> getOrdersByUsername() {
-        return orderRepository.findByUsername("vitthal").stream().map(this::mapToResponse).toList();
+		String username = CommonUtil.getCurrentUsername();
+        return orderRepository.findByUsername(username).stream()
+        		.sorted(Comparator.comparing(Order::getCreatedAt, Comparator.reverseOrder()))
+        		.map(this::mapToResponse).toList();
     }
     
     private OrderResponse mapToResponse(Order booking) {
