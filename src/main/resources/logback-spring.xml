@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+	<!-- Reference Spring Boot's default XML for base config (optional but handy) -->
+	<include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+	
+	<!-- ===================== PROPERTIES ===================== -->
+	<springProperty scope="context" name="appName" source="spring.application.name" defaultValue="UserService"/>
+	<springProperty scope="context" name="logDir" source="applog.dir" defaultValue="logs"/>
+	
+	<property name="LOG_DIR" value="${logDir}"/>
+	<property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+	<property name="CONSOLE_PATTERN" value="%clr(%d{HH:mm:ss.SSS}){faint} %clr(%-5level) %clr([%thread]){magenta} %clr(%logger{36}){cyan} - %msg%n" />
+	
+	<!-- ===================== CONSOLE APPENDER ===================== -->
+	<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<pattern>${CONSOLE_PATTERN}</pattern>
+		</encoder>
+	</appender>
+	
+    <!-- ===================== FILE APPENDER (Rolling by size + date) ===================== -->
+	<appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+		<file>${LOG_DIR}/${appName}.log</file>
+		<encoder>
+			<pattern>${LOG_PATTERN}</pattern>
+		</encoder>
+		<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- Daily rollover, new file also created if size exceeds maxFileSize -->
+			<fileNamePattern>${LOG_DIR}/archived/${appName}-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+			<maxFileSize>10MB</maxFileSize>
+			<maxHistory>10</maxHistory>
+			<totalSizeCap>100MB</totalSizeCap>
+		</rollingPolicy>
+	</appender>
+
+    <!-- ===================== ERROR-ONLY FILE APPENDER ===================== -->
+	<appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+		<file>${LOG_DIR}/${appName}-error.log</file>
+		<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+			<level>ERROR</level>
+		</filter>
+		<encoder>
+			<pattern>${LOG_PATTERN}</pattern>
+		</encoder>
+		<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- Daily rollover, new file also created if size exceeds maxFileSize -->
+			<fileNamePattern>${LOG_DIR}/archived/${appName}-error-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+			<maxFileSize>10MB</maxFileSize>
+			<maxHistory>5</maxHistory>
+			<totalSizeCap>50MB</totalSizeCap>
+		</rollingPolicy>
+	</appender>
+	
+	<!-- ===================== ASYNC APPENDER (wraps FILE for performance) ===================== -->
+	<appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <includeCallerData>false</includeCallerData>
+        <appender-ref ref="FILE"/>
+    </appender>
+    
+    <!-- ===================== PACKAGE-SPECIFIC LOG LEVELS ===================== -->
+    <!-- <logger name="com.ecom.user" level="DEBUG" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ERROR_FILE"/>
+    </logger> -->
+
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="org.hibernate.SQL" level="DEBUG"/>
+    <!-- logs actual SQL parameter values -->
+    <logger name="org.hibernate.type.descriptor.sql" level="TRACE"/>
+    
+    <!-- ===================== PROFILE-SPECIFIC CONFIG ===================== -->
+    <!-- <springProfile name="dev">
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_FILE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="ASYNC_FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </root>
+    </springProfile> -->
+    
+    <!-- ===================== DEFAULT ROOT LOGGER (fallback if no profile matches) ===================== -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ERROR_FILE"/>
+    </root>
+</configuration>
