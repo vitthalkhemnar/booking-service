@@ -30,6 +30,7 @@ public class SecurityConfig {
 			.cors(Customizer.withDefaults())
 			.csrf(csrf -> csrf.disable())
 			.authorizeHttpRequests(requests -> requests
+					.requestMatchers("/orders/all-orders").hasRole("ADMIN")
 					.anyRequest().authenticated()
 			)
 			.sessionManagement(session -> session

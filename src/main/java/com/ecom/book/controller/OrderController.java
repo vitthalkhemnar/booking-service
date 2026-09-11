@@ -21,7 +21,6 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/orders")
 @RequiredArgsConstructor
-@CrossOrigin("*")
 public class OrderController {
 
     private final OrderService orderService;
@@ -41,6 +40,12 @@ public class OrderController {
     @GetMapping
     public ResponseEntity<?> getOrdersByUsername() {
         List<OrderResponse> bookings = orderService.getOrdersByUsername();
+        return ResponseEntity.ok(bookings);
+    }
+    
+    @GetMapping("/all-orders")
+    public ResponseEntity<?> getAllOrders() {
+        List<OrderResponse> bookings = orderService.getAllOrders();
         return ResponseEntity.ok(bookings);
     }
 }

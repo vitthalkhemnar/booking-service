@@ -67,6 +67,12 @@ public class OrderService {
         		.map(this::mapToResponse).toList();
     }
     
+    public List<OrderResponse> getAllOrders() {
+        return orderRepository.findAll().stream()
+        		.sorted(Comparator.comparing(Order::getCreatedAt, Comparator.reverseOrder()))
+        		.map(this::mapToResponse).toList();
+    }
+    
     private OrderResponse mapToResponse(Order booking) {
         List<OrderItemResponse> itemResponses = booking.getItems().stream()
             .map(item -> new OrderItemResponse(
