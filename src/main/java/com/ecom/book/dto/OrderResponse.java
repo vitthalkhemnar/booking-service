@@ -7,9 +7,10 @@ import com.ecom.book.util.OrderStatus;
 
 public record OrderResponse(
     Long bookingId,
+    Long addressId,
     String username,
-    OrderStatus status,
     String totalAmount,
+    OrderStatus status,
     LocalDateTime createdAt,
     List<OrderItemResponse> items
 ) {}

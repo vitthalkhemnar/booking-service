@@ -29,6 +29,7 @@ public class OrderService {
     public OrderResponse createOrder(OrderRequest request) {    	
         Order booking = new Order();
         booking.setTotalAmount(request.totalAmount());
+        booking.setAddressId(request.addressId());
         booking.setStatus(OrderStatus.CONFIRMED);
         booking.setCreatedAt(LocalDateTime.now());
         
@@ -45,7 +46,7 @@ public class OrderService {
             item.setQuantity(itemDto.quantity());
             item.setPriceAtBooking(itemDto.priceAtBooking());
             return item;
-        }).collect(Collectors.toList());
+        }).toList();
 
         booking.getItems().addAll(items);
         
@@ -84,14 +85,14 @@ public class OrderService {
                 item.getColor(),
                 item.getQuantity(),
                 item.getPriceAtBooking()
-            ))
-            .collect(Collectors.toList());
+            )).toList();
 
         return new OrderResponse(
             booking.getOrderId(),
+            booking.getAddressId(),
             booking.getUsername(),
-            booking.getStatus(),
             booking.getTotalAmount(),
+            booking.getStatus(),
             booking.getCreatedAt(),
             itemResponses
         );
