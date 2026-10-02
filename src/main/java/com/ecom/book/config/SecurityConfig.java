@@ -1,4 +1,4 @@
-package com.ecom.book.security;
+package com.ecom.book.config;
 
 import java.util.List;
 
@@ -13,6 +13,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import com.ecom.book.filter.JwtAuthenticationFilter;
 
 import lombok.RequiredArgsConstructor;
 
