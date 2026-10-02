@@ -1,6 +1,7 @@
-package com.ecom.book.dto;
+package com.ecom.order.dto;
 
-public record OrderItemRequest(
+public record OrderItemResponse(
+    Long bookingItemId,
     String productId,
     String variantId,
     String productName,

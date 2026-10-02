@@ -1,4 +1,4 @@
-package com.ecom.book.config;
+package com.ecom.order.config;
 
 import java.util.List;
 
@@ -14,7 +14,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import com.ecom.book.filter.JwtAuthenticationFilter;
+import com.ecom.order.filter.JwtAuthenticationFilter;
 
 import lombok.RequiredArgsConstructor;
 

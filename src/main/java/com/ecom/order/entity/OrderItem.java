@@ -1,4 +1,4 @@
-package com.ecom.book.entity;
+package com.ecom.order.entity;
 
 
 import jakarta.persistence.Entity;

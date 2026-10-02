@@ -1,4 +1,4 @@
-package com.ecom.book.controller;
+package com.ecom.order.controller;
 
 import java.util.List;
 
@@ -12,9 +12,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.ecom.book.dto.OrderRequest;
-import com.ecom.book.dto.OrderResponse;
-import com.ecom.book.service.OrderService;
+import com.ecom.order.dto.OrderRequest;
+import com.ecom.order.dto.OrderResponse;
+import com.ecom.order.service.OrderService;
 
 import lombok.RequiredArgsConstructor;
 

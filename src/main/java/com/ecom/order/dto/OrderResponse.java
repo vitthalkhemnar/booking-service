@@ -1,9 +1,9 @@
-package com.ecom.book.dto;
+package com.ecom.order.dto;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-import com.ecom.book.util.OrderStatus;
+import com.ecom.order.util.OrderStatus;
 
 public record OrderResponse(
     Long bookingId,

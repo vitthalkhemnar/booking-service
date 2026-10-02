@@ -1,4 +1,4 @@
-package com.ecom.book.util;
+package com.ecom.order.util;
 
 public enum OrderStatus {
 	CONFIRMED, DELIVERED

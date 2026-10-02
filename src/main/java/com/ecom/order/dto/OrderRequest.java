@@ -1,4 +1,4 @@
-package com.ecom.book.dto;
+package com.ecom.order.dto;
 
 import java.util.List;
 

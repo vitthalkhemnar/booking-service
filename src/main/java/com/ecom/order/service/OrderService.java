@@ -1,4 +1,4 @@
-package com.ecom.book.service;
+package com.ecom.order.service;
 
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -8,14 +8,14 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.ecom.book.dto.OrderItemResponse;
-import com.ecom.book.dto.OrderRequest;
-import com.ecom.book.dto.OrderResponse;
-import com.ecom.book.entity.Order;
-import com.ecom.book.entity.OrderItem;
-import com.ecom.book.repository.OrderRepository;
-import com.ecom.book.util.CommonUtil;
-import com.ecom.book.util.OrderStatus;
+import com.ecom.order.dto.OrderItemResponse;
+import com.ecom.order.dto.OrderRequest;
+import com.ecom.order.dto.OrderResponse;
+import com.ecom.order.entity.Order;
+import com.ecom.order.entity.OrderItem;
+import com.ecom.order.repository.OrderRepository;
+import com.ecom.order.util.CommonUtil;
+import com.ecom.order.util.OrderStatus;
 
 import lombok.RequiredArgsConstructor;
 

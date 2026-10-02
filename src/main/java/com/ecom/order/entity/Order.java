@@ -1,4 +1,4 @@
-package com.ecom.book.entity;
+package com.ecom.order.entity;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -6,7 +6,7 @@ import java.util.List;
 
 import org.springframework.data.annotation.CreatedDate;
 
-import com.ecom.book.util.OrderStatus;
+import com.ecom.order.util.OrderStatus;
 
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
