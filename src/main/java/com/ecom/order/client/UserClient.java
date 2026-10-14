@@ -10,7 +10,7 @@ import com.ecom.order.config.FeignClientConfig;
 import com.ecom.order.dto.external.AddressDto;
 import com.ecom.order.dto.external.UserDto;
 
-@FeignClient(name = "user-service", url = "${user-service.url:http://localhost:9090}", configuration = FeignClientConfig.class)
+@FeignClient(name = "user-service", url = "${user-service.url:}", configuration = FeignClientConfig.class)
 public interface UserClient {
 
 	@GetMapping("/user")
