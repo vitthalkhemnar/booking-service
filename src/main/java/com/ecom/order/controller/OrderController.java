@@ -59,8 +59,8 @@ public class OrderController {
         description = "Retrieves all past orders placed by the currently authenticated customer."
     )
     @GetMapping
-    public ResponseEntity<List<OrderResponse>> getOrdersByUsername() {
-        List<OrderResponse> bookings = orderService.getOrdersByUsername();
+    public ResponseEntity<List<OrderResponse>> getOrders() {
+        List<OrderResponse> bookings = orderService.getOrders();
         return ResponseEntity.ok(bookings);
     }
     

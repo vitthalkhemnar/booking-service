@@ -4,7 +4,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,8 +44,8 @@ public class OrderService {
         booking.setStatus(OrderStatus.CONFIRMED);
         booking.setCreatedAt(LocalDateTime.now());
         
-        String username = CommonUtil.getCurrentUsername();
-        booking.setUsername(username);
+        UserDto currentUser = userClient.getCurrentUser();
+        booking.setUserId(currentUser.id());
 
         List<OrderItem> items = request.items().stream().map(itemDto -> {
             OrderItem item = new OrderItem();
@@ -65,65 +67,42 @@ public class OrderService {
     }
 
     public OrderResponse getOrderById(Long bookingId) {
-        Order order = orderRepository.findById(bookingId)
-                .orElseThrow(() -> new RuntimeException("Booking not found with id: " + bookingId));
+    	Order order;
+    	if(CommonUtil.isAdmin()) {
+    		order = orderRepository.findById(bookingId)
+    			.orElseThrow(() -> new RuntimeException("Booking not found with id: " + bookingId));    		
+		} else {
+			UserDto currentUser = userClient.getCurrentUser();
+			order = orderRepository.findByOrderIdAndUserId(bookingId, currentUser.id())
+					.orElseThrow(() -> new RuntimeException("Booking not found with id: " + bookingId));
+		}
         return mapToEnrichedResponse(order);
     }
 
-    public List<OrderResponse> getOrdersByUsername() {
-        String username = CommonUtil.getCurrentUsername();
-        return orderRepository.findByUsername(username).stream()
+    public List<OrderResponse> getOrders() {
+        UserDto currentUser = userClient.getCurrentUser();
+        return orderRepository.findByUserId(currentUser.id()).stream()
                 .sorted(Comparator.comparing(Order::getCreatedAt, Comparator.reverseOrder()))
-                .map(this::mapToResponse)
+                .map(this::mapToEnrichedResponse)
                 .toList();
     }
     
     public List<OrderResponse> getAllOrders() {
         return orderRepository.findAll().stream()
                 .sorted(Comparator.comparing(Order::getCreatedAt, Comparator.reverseOrder()))
-                .map(this::mapToResponse)
+                .map(this::mapToEnrichedResponse)
                 .toList();
-    }
-    
-    private OrderResponse mapToResponse(Order booking) {
-        List<OrderItemResponse> itemResponses = booking.getItems().stream()
-            .map(item -> new OrderItemResponse(
-                item.getOrderItemId(),
-                item.getProductId(),
-                item.getVariantId(),
-                item.getProductName(),
-                item.getSize(),
-                item.getColor(),
-                item.getQuantity(),
-                item.getPriceAtBooking()
-            )).toList();
-
-        return new OrderResponse(
-            booking.getOrderId(),
-            booking.getAddressId(),
-            booking.getUsername(),
-            booking.getTotalAmount(),
-            booking.getStatus(),
-            booking.getCreatedAt(),
-            itemResponses
-        );
     }
 
     private OrderResponse mapToEnrichedResponse(Order booking) {
         UserDto user = null;
         AddressDto address = null;
 
-        // Fetch User details via OpenFeign
-        try {
-            user = userClient.getCurrentUser();
-        } catch (Exception e) {
-            log.warn("Failed to fetch current user via Feign: {}", e.getMessage());
-        }
-        if (user == null && booking.getUsername() != null && !booking.getUsername().isBlank()) {
+        if (user == null && booking.getUserId() != null) {
             try {
-                user = userClient.getUserByUsername(booking.getUsername());
+                user = userClient.getUserById(booking.getUserId());
             } catch (Exception e) {
-                log.warn("Failed to fetch user by username {} via Feign: {}", booking.getUsername(), e.getMessage());
+                log.warn("Failed to fetch user by username {} via Feign: {}", booking.getUserId(), e.getMessage());
             }
         }
 
@@ -188,7 +167,8 @@ public class OrderService {
         return new OrderResponse(
             booking.getOrderId(),
             booking.getAddressId(),
-            booking.getUsername(),
+            booking.getUserId(),
+            user != null ? user.username() : String.valueOf(booking.getUserId()),
             booking.getTotalAmount(),
             booking.getStatus(),
             booking.getCreatedAt(),

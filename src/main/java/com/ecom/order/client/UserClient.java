@@ -15,9 +15,9 @@ public interface UserClient {
 
 	@GetMapping("/user")
 	UserDto getCurrentUser();
-
-	@GetMapping("/user/by-username/{username}")
-	UserDto getUserByUsername(@PathVariable("username") String username);
+	
+	@GetMapping("/user/{userId}")
+	UserDto getUserById(@PathVariable("userId") Long userId);
 
 	@GetMapping("/address")
 	List<AddressDto> getUserAddresses();

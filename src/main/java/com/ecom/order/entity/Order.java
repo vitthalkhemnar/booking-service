@@ -36,7 +36,7 @@ public class Order {
 	@Column(name = "address_id")
 	private Long addressId;
 	
-	private String username;
+	private Long userId;
 		
 	@Column(name = "total_amount")
 	private String totalAmount;

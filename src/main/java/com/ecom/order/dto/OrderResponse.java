@@ -10,6 +10,7 @@ import com.ecom.order.util.OrderStatus;
 public record OrderResponse(
     Long bookingId,
     Long addressId,
+    Long userId,
     String username,
     String totalAmount,
     OrderStatus status,
@@ -21,12 +22,13 @@ public record OrderResponse(
     public OrderResponse(
         Long bookingId,
         Long addressId,
+        Long userId,
         String username,
         String totalAmount,
         OrderStatus status,
         LocalDateTime createdAt,
         List<OrderItemResponse> items
     ) {
-        this(bookingId, addressId, username, totalAmount, status, createdAt, items, null, null);
+        this(bookingId, addressId, userId, username, totalAmount, status, createdAt, items, null, null);
     }
 }
