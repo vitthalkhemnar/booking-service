@@ -16,12 +16,16 @@ import com.ecom.order.dto.OrderItemResponse;
 import com.ecom.order.dto.OrderPlacedEvent;
 import com.ecom.order.dto.OrderRequest;
 import com.ecom.order.dto.OrderResponse;
+import com.ecom.order.dto.OrderTrackingResponse;
+import com.ecom.order.dto.OrderTransLogDto;
 import com.ecom.order.dto.external.AddressDto;
 import com.ecom.order.dto.external.ProductDto;
 import com.ecom.order.dto.external.UserDto;
 import com.ecom.order.entity.Order;
 import com.ecom.order.entity.OrderItem;
+import com.ecom.order.entity.OrderTransLog;
 import com.ecom.order.repository.OrderRepository;
+import com.ecom.order.repository.OrderTransLogRepository;
 import com.ecom.order.util.CommonUtil;
 import com.ecom.order.util.OrderStatus;
 
@@ -34,6 +38,7 @@ import lombok.extern.slf4j.Slf4j;
 public class OrderService {
 
     private final OrderRepository orderRepository;
+    private final OrderTransLogRepository ordTransLogRepository;
     private final UserClient userClient;
     private final ProductClient productClient;
     private final OrderEventProducer orderEventProducer;
@@ -63,6 +68,19 @@ public class OrderService {
 
         booking.getItems().addAll(items);
         Order savedBooking = orderRepository.save(booking);
+
+        try {
+            OrderTransLog initialLog = new OrderTransLog();
+            initialLog.setOrder(savedBooking);
+            initialLog.setFromState(null);
+            initialLog.setToState(OrderStatus.CREATED);
+            initialLog.setCreatedBy(currentUser != null && currentUser.username() != null ? currentUser.username() : "CUSTOMER");
+            initialLog.setCreatedAt(savedBooking.getCreatedAt() != null ? savedBooking.getCreatedAt() : LocalDateTime.now());
+            ordTransLogRepository.save(initialLog);
+        } catch (Exception e) {
+            log.warn("Failed to create initial OrderTransLog entry for order #{}: {}", savedBooking.getOrderId(), e.getMessage());
+        }
+
         OrderResponse orderResponse = mapToEnrichedResponse(savedBooking);
         
         // publishing order placed event
@@ -82,6 +100,103 @@ public class OrderService {
 					.orElseThrow(() -> new RuntimeException("Booking not found with id: " + bookingId));
 		}
         return mapToEnrichedResponse(order);
+    }
+
+    public OrderTrackingResponse getOrderTracking(Long orderId) {
+        Order order;
+        if (CommonUtil.isAdmin()) {
+            order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found with id: " + orderId));
+        } else {
+            UserDto currentUser = userClient.getCurrentUser();
+            order = orderRepository.findByOrderIdAndUserId(orderId, currentUser.id())
+                .orElseThrow(() -> new RuntimeException("Order not found with id: " + orderId));
+        }
+
+        OrderResponse enriched = mapToEnrichedResponse(order);
+        boolean isAdmin = CommonUtil.isAdmin();
+        List<OrderTransLogDto> logDtos = new ArrayList<>();
+
+        // OrderTransLog Activity Ledger is only exposed to Admin
+        if (isAdmin) {
+            List<OrderTransLog> logs = ordTransLogRepository.findByOrderOrderByTransLogIdAsc(order);
+            if (logs.isEmpty()) {
+                logDtos.add(new OrderTransLogDto(
+                    1L,
+                    order.getOrderId(),
+                    null,
+                    OrderStatus.CREATED,
+                    "CUSTOMER",
+                    order.getCreatedAt() != null ? order.getCreatedAt() : LocalDateTime.now(),
+                    "Order Placed",
+                    "Your order has been placed and received by our system."
+                ));
+                if (order.getStatus() != null && order.getStatus() != OrderStatus.CREATED) {
+                    logDtos.add(new OrderTransLogDto(
+                        2L,
+                        order.getOrderId(),
+                        OrderStatus.CREATED,
+                        order.getStatus(),
+                        "SYSTEM",
+                        order.getCreatedAt() != null ? order.getCreatedAt() : LocalDateTime.now(),
+                        formatStatusTitle(order.getStatus()),
+                        formatStatusDescription(order.getStatus())
+                    ));
+                }
+            } else {
+                for (OrderTransLog logItem : logs) {
+                    logDtos.add(new OrderTransLogDto(
+                        logItem.getTransLogId(),
+                        order.getOrderId(),
+                        logItem.getFromState(),
+                        logItem.getToState(),
+                        logItem.getCreatedBy() != null ? logItem.getCreatedBy() : "SYSTEM",
+                        logItem.getCreatedAt() != null ? logItem.getCreatedAt() : order.getCreatedAt(),
+                        formatStatusTitle(logItem.getToState()),
+                        formatStatusDescription(logItem.getToState())
+                    ));
+                }
+            }
+        }
+
+        return new OrderTrackingResponse(
+            order.getOrderId(),
+            order.getStatus(),
+            order.getCreatedAt(),
+            order.getTotalAmount(),
+            enriched.user(),
+            enriched.address(),
+            enriched.items(),
+            logDtos
+        );
+    }
+
+    private String formatStatusTitle(OrderStatus status) {
+        if (status == null) return "Status Updated";
+        return switch (status) {
+            case CREATED -> "Order Placed";
+            case CONFIRMED -> "Order Confirmed";
+            case PAYMENT_PENDING -> "Payment Pending";
+            case PAYMENT_SUCCESS -> "Payment Completed";
+            case PAYMENT_FAILED -> "Payment Failed";
+            case DELIVERED -> "Delivered";
+            case CANCELLED -> "Order Cancelled";
+            case FAILED -> "Order Failed";
+        };
+    }
+
+    private String formatStatusDescription(OrderStatus status) {
+        if (status == null) return "Order state transition recorded.";
+        return switch (status) {
+            case CREATED -> "Your order has been placed and received by our system.";
+            case CONFIRMED -> "Payment has been verified and seller confirmed your order.";
+            case PAYMENT_PENDING -> "Waiting for payment processing and verification.";
+            case PAYMENT_SUCCESS -> "Your payment was successfully received.";
+            case PAYMENT_FAILED -> "Payment was declined or unsuccessful.";
+            case DELIVERED -> "Package has been delivered to your delivery address.";
+            case CANCELLED -> "This order has been cancelled.";
+            case FAILED -> "Processing encountered an issue and order failed.";
+        };
     }
 
     public List<OrderResponse> getOrders() {

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.ecom.order.dto.OrderRequest;
 import com.ecom.order.dto.OrderResponse;
+import com.ecom.order.dto.OrderTrackingResponse;
 import com.ecom.order.service.OrderService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -51,6 +52,19 @@ public class OrderController {
             @PathVariable Long orderId) {
         OrderResponse booking = orderService.getOrderById(orderId);
         return ResponseEntity.ok(booking);
+    }
+
+    @Tag(name = "Customer Orders", description = "Endpoints for placing orders and viewing personal order history")
+    @Operation(
+        summary = "Get order tracking flow",
+        description = "Retrieves live tracking status and chronological state transitions from OrderTransLog for an order."
+    )
+    @GetMapping("/{orderId}/tracking")
+    public ResponseEntity<OrderTrackingResponse> getOrderTracking(
+            @Parameter(description = "Unique ID of the order", required = true)
+            @PathVariable Long orderId) {
+        OrderTrackingResponse tracking = orderService.getOrderTracking(orderId);
+        return ResponseEntity.ok(tracking);
     }
 
     @Tag(name = "Customer Orders", description = "Endpoints for placing orders and viewing personal order history")

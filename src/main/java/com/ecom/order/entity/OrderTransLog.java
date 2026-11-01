@@ -3,12 +3,13 @@ package com.ecom.order.entity;
 import java.time.LocalDateTime;
 
 import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import com.ecom.order.util.OrderStatus;
 
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
@@ -24,6 +25,7 @@ import lombok.Setter;
 @Setter
 @Getter
 @Entity
+@EntityListeners(AuditingEntityListener.class)
 @Table(name = "order_translog")
 public class OrderTransLog {
 	
@@ -50,5 +52,4 @@ public class OrderTransLog {
 	@CreatedDate
 	@Column(name = "created_at")
 	private LocalDateTime createdAt;
-
 }

@@ -45,10 +45,22 @@ public class OrderStateService {
 		orderTransLog.setOrder(order);
 		orderTransLog.setFromState(currentStatus);
 		orderTransLog.setToState(toState);
-		orderTransLog.setCreatedBy("SYSTEM");
+		
+		String actor = "SYSTEM";
+		try {
+			if (org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null) {
+				String authName = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName();
+				if (authName != null && !authName.equalsIgnoreCase("anonymousUser") && !authName.isBlank()) {
+					actor = authName;
+				}
+			}
+		} catch (Exception ignored) {}
+
+		orderTransLog.setCreatedBy(actor);
+		orderTransLog.setCreatedAt(java.time.LocalDateTime.now());
 		ordTransLogRepository.save(orderTransLog);
 
-		log.info("[STATE-TRANSITION] {} >>> {}", currentStatus, toState);
+		log.info("[STATE-TRANSITION] {} >>> {} by {}", currentStatus, toState, actor);
 	}
 
 }
