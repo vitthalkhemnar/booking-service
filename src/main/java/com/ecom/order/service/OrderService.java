@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.ecom.order.client.ProductClient;
 import com.ecom.order.client.UserClient;
 import com.ecom.order.dto.OrderItemResponse;
+import com.ecom.order.dto.OrderPlacedEvent;
 import com.ecom.order.dto.OrderRequest;
 import com.ecom.order.dto.OrderResponse;
 import com.ecom.order.dto.external.AddressDto;
@@ -35,13 +36,14 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final UserClient userClient;
     private final ProductClient productClient;
+    private final OrderEventProducer orderEventProducer;
     
     @Transactional
     public OrderResponse createOrder(OrderRequest request) {    	
         Order booking = new Order();
         booking.setTotalAmount(request.totalAmount());
         booking.setAddressId(request.addressId());
-        booking.setStatus(OrderStatus.CONFIRMED);
+        booking.setStatus(OrderStatus.CREATED);
         booking.setCreatedAt(LocalDateTime.now());
         
         UserDto currentUser = userClient.getCurrentUser();
@@ -60,10 +62,13 @@ public class OrderService {
         }).toList();
 
         booking.getItems().addAll(items);
-        
         Order savedBooking = orderRepository.save(booking);
+        OrderResponse orderResponse = mapToEnrichedResponse(savedBooking);
+        
+        // publishing order placed event
+        orderEventProducer.publishOrderPlacedEvent(new OrderPlacedEvent(orderResponse, currentUser.email()));
 
-        return mapToEnrichedResponse(savedBooking);
+        return orderResponse;
     }
 
     public OrderResponse getOrderById(Long bookingId) {
