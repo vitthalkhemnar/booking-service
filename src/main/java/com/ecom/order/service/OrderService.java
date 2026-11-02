@@ -4,9 +4,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -114,50 +112,18 @@ public class OrderService {
         }
 
         OrderResponse enriched = mapToEnrichedResponse(order);
-        boolean isAdmin = CommonUtil.isAdmin();
-        List<OrderTransLogDto> logDtos = new ArrayList<>();
-
-        // OrderTransLog Activity Ledger is only exposed to Admin
-        if (isAdmin) {
-            List<OrderTransLog> logs = ordTransLogRepository.findByOrderOrderByTransLogIdAsc(order);
-            if (logs.isEmpty()) {
-                logDtos.add(new OrderTransLogDto(
-                    1L,
-                    order.getOrderId(),
-                    null,
-                    OrderStatus.CREATED,
-                    "CUSTOMER",
-                    order.getCreatedAt() != null ? order.getCreatedAt() : LocalDateTime.now(),
-                    "Order Placed",
-                    "Your order has been placed and received by our system."
-                ));
-                if (order.getStatus() != null && order.getStatus() != OrderStatus.CREATED) {
-                    logDtos.add(new OrderTransLogDto(
-                        2L,
-                        order.getOrderId(),
-                        OrderStatus.CREATED,
-                        order.getStatus(),
-                        "SYSTEM",
-                        order.getCreatedAt() != null ? order.getCreatedAt() : LocalDateTime.now(),
-                        formatStatusTitle(order.getStatus()),
-                        formatStatusDescription(order.getStatus())
-                    ));
-                }
-            } else {
-                for (OrderTransLog logItem : logs) {
-                    logDtos.add(new OrderTransLogDto(
-                        logItem.getTransLogId(),
-                        order.getOrderId(),
-                        logItem.getFromState(),
-                        logItem.getToState(),
-                        logItem.getCreatedBy() != null ? logItem.getCreatedBy() : "SYSTEM",
-                        logItem.getCreatedAt() != null ? logItem.getCreatedAt() : order.getCreatedAt(),
-                        formatStatusTitle(logItem.getToState()),
-                        formatStatusDescription(logItem.getToState())
-                    ));
-                }
-            }
-        }
+        List<OrderTransLogDto> logDtos = ordTransLogRepository.findByOrderOrderByTransLogIdAsc(order).stream()
+            .map(logItem -> new OrderTransLogDto(
+                logItem.getTransLogId(),
+                order.getOrderId(),
+                logItem.getFromState(),
+                logItem.getToState(),
+                logItem.getCreatedBy() != null ? logItem.getCreatedBy() : "SYSTEM",
+                logItem.getCreatedAt() != null ? logItem.getCreatedAt() : order.getCreatedAt(),
+                formatStatusTitle(logItem.getToState()),
+                formatStatusDescription(logItem.getToState())
+            ))
+            .toList();
 
         return new OrderTrackingResponse(
             order.getOrderId(),
