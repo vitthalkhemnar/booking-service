@@ -1,5 +1,7 @@
 package com.ecom.order.service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -10,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.ecom.order.client.ProductClient;
 import com.ecom.order.client.UserClient;
+import com.ecom.order.dto.OrderItemRequest;
 import com.ecom.order.dto.OrderItemResponse;
 import com.ecom.order.dto.OrderPlacedEvent;
 import com.ecom.order.dto.OrderRequest;
@@ -19,6 +22,7 @@ import com.ecom.order.dto.OrderTransLogDto;
 import com.ecom.order.dto.external.AddressDto;
 import com.ecom.order.dto.external.ProductDto;
 import com.ecom.order.dto.external.UserDto;
+import com.ecom.order.dto.external.VariantDto;
 import com.ecom.order.entity.Order;
 import com.ecom.order.entity.OrderItem;
 import com.ecom.order.entity.OrderTransLog;
@@ -42,28 +46,142 @@ public class OrderService {
     private final OrderEventProducer orderEventProducer;
     
     @Transactional
-    public OrderResponse createOrder(OrderRequest request) {    	
+    public OrderResponse createOrder(OrderRequest request) {
+        if (request == null || request.items() == null || request.items().isEmpty()) {
+            throw new IllegalArgumentException("Order must contain at least one item.");
+        }
+        if (request.addressId() == null) {
+            throw new IllegalArgumentException("Delivery address is required.");
+        }
+
+        UserDto currentUser = userClient.getCurrentUser();
+        if (currentUser == null || currentUser.id() == null) {
+            throw new IllegalStateException("Failed to resolve current authenticated user.");
+        }
+
         Order booking = new Order();
-        booking.setTotalAmount(request.totalAmount());
         booking.setAddressId(request.addressId());
         booking.setStatus(OrderStatus.CREATED);
         booking.setCreatedAt(LocalDateTime.now());
-        
-        UserDto currentUser = userClient.getCurrentUser();
         booking.setUserId(currentUser.id());
 
-        List<OrderItem> items = request.items().stream().map(itemDto -> {
+        BigDecimal calculatedTotal = BigDecimal.ZERO;
+        List<OrderItem> items = new ArrayList<>();
+
+        for (OrderItemRequest itemDto : request.items()) {
+            if (itemDto.productId() == null || itemDto.productId().isBlank()) {
+                throw new IllegalArgumentException("Product ID is required for each item.");
+            }
+
+            int quantity;
+            try {
+                quantity = Integer.parseInt(itemDto.quantity().trim());
+                if (quantity <= 0) {
+                    throw new IllegalArgumentException("Item quantity must be greater than zero.");
+                }
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid quantity format for product: " + itemDto.productId());
+            }
+
+            Long productId;
+            try {
+                productId = Long.parseLong(itemDto.productId().trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid product ID: " + itemDto.productId());
+            }
+
+            ProductDto product = productClient.getProductById(productId);
+            if (product == null) {
+                throw new IllegalArgumentException("Product not found with ID: " + productId);
+            }
+
+            BigDecimal unitPrice = null;
+            Long variantId = null;
+
+            if (itemDto.variantId() != null && !itemDto.variantId().isBlank()) {
+                try {
+                    variantId = Long.parseLong(itemDto.variantId().trim());
+                    VariantDto variant = null;
+                    try {
+                        variant = productClient.getVariantById(variantId);
+                    } catch (Exception e) {
+                        log.debug("Direct variant lookup by id {} failed: {}", variantId, e.getMessage());
+                    }
+
+                    if (variant == null) {
+                        try {
+                            List<VariantDto> variants = productClient.getVariantsByProductId(productId);
+                            if (variants != null) {
+                                final Long targetVariantId = variantId;
+                                variant = variants.stream()
+                                        .filter(v -> targetVariantId.equals(v.variantId()))
+                                        .findFirst()
+                                        .orElse(null);
+                            }
+                        } catch (Exception e) {
+                            log.warn("Variant lookup by productId {} failed: {}", productId, e.getMessage());
+                        }
+                    }
+
+                    if (variant != null) {
+                        if (!productId.equals(variant.productId())) {
+                            throw new IllegalArgumentException(
+                                    "Variant ID " + variantId + " does not belong to Product ID " + productId
+                            );
+                        }
+                        if (!variant.active()) {
+                            throw new IllegalArgumentException(
+                                    "Variant " + (variant.sku() != null ? variant.sku() : variantId) + " is not currently active."
+                            );
+                        }
+                        unitPrice = variant.price();
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
+
+            // Fallback to product price if no variant price was resolved
+            if (unitPrice == null) {
+                unitPrice = product.price();
+            }
+
+            if (unitPrice == null) {
+                throw new IllegalStateException("Authoritative price could not be determined for product ID: " + productId);
+            }
+
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(quantity));
+            calculatedTotal = calculatedTotal.add(lineTotal);
+
             OrderItem item = new OrderItem();
-            item.setProductId(itemDto.productId());
-            item.setVariantId(itemDto.variantId());
-            item.setProductName(itemDto.productName());
+            item.setProductId(String.valueOf(productId));
+            item.setVariantId(variantId != null ? String.valueOf(variantId) : (itemDto.variantId() != null ? itemDto.variantId().trim() : ""));
+            item.setProductName(product.productName() != null ? product.productName() : itemDto.productName());
             item.setSize(itemDto.size());
             item.setColor(itemDto.color());
-            item.setQuantity(itemDto.quantity());
-            item.setPriceAtBooking(itemDto.priceAtBooking());
-            return item;
-        }).toList();
+            item.setQuantity(String.valueOf(quantity));
+            item.setPriceAtBooking(unitPrice.setScale(2, RoundingMode.HALF_UP).toString());
+            items.add(item);
+        }
 
+        BigDecimal serverCalculatedTotal = calculatedTotal.setScale(2, RoundingMode.HALF_UP);
+
+        // Verify client-submitted total against authoritative server-calculated total
+        if (request.totalAmount() != null && !request.totalAmount().isBlank()) {
+            try {
+                BigDecimal clientTotal = new BigDecimal(request.totalAmount().trim()).setScale(2, RoundingMode.HALF_UP);
+                if (clientTotal.compareTo(serverCalculatedTotal) != 0) {
+                    log.warn("Price mismatch rejected for user ID {}: client sent ₹{}, server computed ₹{}",
+                            currentUser.id(), clientTotal, serverCalculatedTotal);
+                    throw new IllegalArgumentException(
+                            String.format("Price mismatch detected. Expected order total: ₹%s, but received: ₹%s. Please refresh your cart.",
+                                    serverCalculatedTotal, clientTotal)
+                    );
+                }
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid totalAmount format: " + request.totalAmount());
+            }
+        }
+
+        booking.setTotalAmount(serverCalculatedTotal.toString());
         booking.getItems().addAll(items);
         Order savedBooking = orderRepository.save(booking);
 
@@ -72,7 +190,7 @@ public class OrderService {
             initialLog.setOrder(savedBooking);
             initialLog.setFromState(null);
             initialLog.setToState(OrderStatus.CREATED);
-            initialLog.setCreatedBy(currentUser != null && currentUser.username() != null ? currentUser.username() : "CUSTOMER");
+            initialLog.setCreatedBy(currentUser.username() != null ? currentUser.username() : "CUSTOMER");
             initialLog.setCreatedAt(savedBooking.getCreatedAt() != null ? savedBooking.getCreatedAt() : LocalDateTime.now());
             ordTransLogRepository.save(initialLog);
         } catch (Exception e) {
