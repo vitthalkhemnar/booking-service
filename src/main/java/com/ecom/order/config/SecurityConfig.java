@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -20,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 	
@@ -34,6 +36,7 @@ public class SecurityConfig {
 			.authorizeHttpRequests(requests -> requests
 					.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 					.requestMatchers("/orders/all-orders").hasRole("ADMIN")
+					.requestMatchers("/order/state/**").hasRole("ADMIN")
 					.anyRequest().authenticated()
 			)
 			.sessionManagement(session -> session
@@ -58,4 +61,5 @@ public class SecurityConfig {
 		
 		return source;
 	}
+
 }
