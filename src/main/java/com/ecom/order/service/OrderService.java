@@ -5,7 +5,10 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +24,7 @@ import com.ecom.order.dto.OrderTrackingResponse;
 import com.ecom.order.dto.OrderTransLogDto;
 import com.ecom.order.dto.external.AddressDto;
 import com.ecom.order.dto.external.ProductDto;
+import com.ecom.order.dto.external.StockUpdateRequest;
 import com.ecom.order.dto.external.UserDto;
 import com.ecom.order.dto.external.VariantDto;
 import com.ecom.order.entity.Order;
@@ -31,6 +35,7 @@ import com.ecom.order.repository.OrderTransLogRepository;
 import com.ecom.order.util.CommonUtil;
 import com.ecom.order.util.OrderStatus;
 
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -67,6 +72,8 @@ public class OrderService {
 
         BigDecimal calculatedTotal = BigDecimal.ZERO;
         List<OrderItem> items = new ArrayList<>();
+        Map<Long, Integer> variantQuantities = new LinkedHashMap<>();
+        Map<Long, VariantDto> resolvedVariants = new HashMap<>();
 
         for (OrderItemRequest itemDto : request.items()) {
             if (itemDto.productId() == null || itemDto.productId().isBlank()) {
@@ -135,6 +142,8 @@ public class OrderService {
                             );
                         }
                         unitPrice = variant.price();
+                        resolvedVariants.put(variantId, variant);
+                        variantQuantities.merge(variantId, quantity, Integer::sum);
                     }
                 } catch (NumberFormatException ignored) {}
             }
@@ -162,9 +171,32 @@ public class OrderService {
             items.add(item);
         }
 
+        // 1. INVENTORY VERIFICATION: Check available stock across all requested variants
+        for (Map.Entry<Long, Integer> entry : variantQuantities.entrySet()) {
+            Long vId = entry.getKey();
+            int requestedQty = entry.getValue();
+            VariantDto variant = resolvedVariants.get(vId);
+
+            int availableStock = (variant != null && variant.stock() != null) ? variant.stock() : 0;
+            if (availableStock <= 0) {
+                throw new IllegalArgumentException(
+                        String.format("Product variant %s is currently out of stock.",
+                                (variant != null && variant.sku() != null) ? variant.sku() : String.valueOf(vId))
+                );
+            }
+            if (requestedQty > availableStock) {
+                throw new IllegalArgumentException(
+                        String.format("Insufficient stock for variant %s. Requested: %d, Available: %d",
+                                (variant != null && variant.sku() != null) ? variant.sku() : String.valueOf(vId),
+                                requestedQty,
+                                availableStock)
+                );
+            }
+        }
+
         BigDecimal serverCalculatedTotal = calculatedTotal.setScale(2, RoundingMode.HALF_UP);
 
-        // Verify client-submitted total against authoritative server-calculated total
+        // 2. PRICE INTEGRITY VERIFICATION: Verify client-submitted total against authoritative server-calculated total
         if (request.totalAmount() != null && !request.totalAmount().isBlank()) {
             try {
                 BigDecimal clientTotal = new BigDecimal(request.totalAmount().trim()).setScale(2, RoundingMode.HALF_UP);
@@ -181,9 +213,40 @@ public class OrderService {
             }
         }
 
-        booking.setTotalAmount(serverCalculatedTotal.toString());
-        booking.getItems().addAll(items);
-        Order savedBooking = orderRepository.save(booking);
+        // 3. INVENTORY DEDUCTION: Atomically deduct stock in product-service before finalizing order
+        List<StockUpdateRequest> stockDeductionRequests = variantQuantities.entrySet().stream()
+                .map(e -> new StockUpdateRequest(e.getKey(), e.getValue()))
+                .toList();
+
+        if (!stockDeductionRequests.isEmpty()) {
+            try {
+                productClient.deductStock(stockDeductionRequests);
+            } catch (FeignException e) {
+                log.error("Stock deduction rejected by product-service: status={}, body={}", e.status(), e.contentUTF8());
+                throw new IllegalArgumentException("Stock reservation failed: " + extractFeignMessage(e));
+            } catch (Exception e) {
+                log.error("Unexpected error during stock deduction: {}", e.getMessage());
+                throw new IllegalStateException("Failed to reserve product inventory: " + e.getMessage());
+            }
+        }
+
+        // 4. PERSISTENCE: Save order with rollback compensation if database save fails
+        Order savedBooking;
+        try {
+            booking.setTotalAmount(serverCalculatedTotal.toString());
+            booking.getItems().addAll(items);
+            savedBooking = orderRepository.save(booking);
+        } catch (Exception e) {
+            log.error("Failed to persist order in database, restoring reserved stock: {}", e.getMessage());
+            if (!stockDeductionRequests.isEmpty()) {
+                try {
+                    productClient.restoreStock(stockDeductionRequests);
+                } catch (Exception restoreEx) {
+                    log.error("Failed to restore stock after order save failure: {}", restoreEx.getMessage());
+                }
+            }
+            throw e;
+        }
 
         try {
             OrderTransLog initialLog = new OrderTransLog();
@@ -203,6 +266,20 @@ public class OrderService {
         orderEventProducer.publishOrderPlacedEvent(new OrderPlacedEvent(orderResponse, currentUser.email()));
 
         return orderResponse;
+    }
+
+    private String extractFeignMessage(FeignException e) {
+        String content = e.contentUTF8();
+        if (content != null && content.contains("\"message\":")) {
+            try {
+                int start = content.indexOf("\"message\":\"") + 11;
+                int end = content.indexOf("\"", start);
+                if (start > 10 && end > start) {
+                    return content.substring(start, end);
+                }
+            } catch (Exception ignored) {}
+        }
+        return (e.getMessage() != null) ? e.getMessage() : "Insufficient inventory or item unavailable.";
     }
 
     public OrderResponse getOrderById(Long bookingId) {
