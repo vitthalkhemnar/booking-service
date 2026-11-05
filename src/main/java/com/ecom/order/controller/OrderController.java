@@ -57,15 +57,29 @@ public class OrderController {
 
     @Tag(name = "Customer Orders", description = "Endpoints for placing orders and viewing personal order history")
     @Operation(
-        summary = "Rollback order upon payment failure or cancellation",
-        description = "Cancels the order, restores reserved warehouse stock, and logs the cancellation."
+        summary = "Rollback and delete order upon payment failure or cancellation",
+        description = "Restores reserved warehouse stock and deletes the unpaid order from the database."
     )
     @PostMapping("/{orderId}/rollback")
-    public ResponseEntity<OrderResponse> rollbackOrder(
+    public ResponseEntity<Void> rollbackOrder(
             @Parameter(description = "Unique ID of the order to rollback", required = true)
             @PathVariable Long orderId,
             @RequestParam(value = "reason", required = false) String reason) {
-        OrderResponse response = orderService.rollbackOrder(orderId, reason != null ? reason : "Payment failed or cancelled");
+        orderService.rollbackOrder(orderId, reason != null ? reason : "Payment failed or cancelled");
+        return ResponseEntity.noContent().build();
+    }
+
+    @Tag(name = "Customer Orders", description = "Endpoints for placing orders and viewing personal order history")
+    @Operation(
+        summary = "Mark order as failed after payment error",
+        description = "Transitions an order to FAILED status when payment succeeded but a downstream system error occurred."
+    )
+    @PostMapping("/{orderId}/fail")
+    public ResponseEntity<OrderResponse> markOrderFailed(
+            @Parameter(description = "Unique ID of the order", required = true)
+            @PathVariable Long orderId,
+            @RequestParam(value = "reason", required = false) String reason) {
+        OrderResponse response = orderService.markOrderFailed(orderId, reason != null ? reason : "System error after payment");
         return ResponseEntity.ok(response);
     }
 

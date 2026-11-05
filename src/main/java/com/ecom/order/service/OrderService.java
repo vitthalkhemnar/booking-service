@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -336,30 +337,26 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderResponse rollbackOrder(Long orderId, String reason) {
-        Order order;
+    public void rollbackOrder(Long orderId, String reason) {
+        Optional<Order> orderOpt;
         if (CommonUtil.isAdmin()) {
-            order = orderRepository.findById(orderId)
-                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+            orderOpt = orderRepository.findById(orderId);
         } else {
             UserDto currentUser = userClient.getCurrentUser();
-            order = orderRepository.findByOrderIdAndUserId(orderId, currentUser.id())
-                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+            orderOpt = orderRepository.findByOrderIdAndUserId(orderId, currentUser.id());
         }
+
+        if (orderOpt.isEmpty()) {
+            log.info("Order #{} already deleted or not found for rollback.", orderId);
+            return;
+        }
+
+        Order order = orderOpt.get();
 
         if (order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.DELIVERED) {
-            log.warn("Order #{} is already confirmed/delivered; cannot rollback directly.", orderId);
-            return mapToEnrichedResponse(order);
+            log.warn("Order #{} is already confirmed/delivered; cannot rollback or delete.", orderId);
+            return;
         }
-
-        if (order.getStatus() == OrderStatus.CANCELLED) {
-            log.info("Order #{} is already cancelled.", orderId);
-            return mapToEnrichedResponse(order);
-        }
-
-        OrderStatus previousStatus = order.getStatus();
-        order.setStatus(OrderStatus.CANCELLED);
-        Order updatedOrder = orderRepository.save(order);
 
         // Restore reserved inventory stock
         if (order.getItems() != null && !order.getItems().isEmpty()) {
@@ -387,11 +384,39 @@ public class OrderService {
             }
         }
 
+        // Delete order transaction logs first to prevent foreign key violation
+        try {
+            ordTransLogRepository.deleteByOrder_OrderId(orderId);
+        } catch (Exception e) {
+            log.warn("Failed to delete OrderTransLog for rolled back order #{}: {}", orderId, e.getMessage());
+        }
+
+        // Delete order entity (cascades to OrderItem)
+        orderRepository.delete(order);
+        log.info("Rolled back and deleted order #{} from database. Reason: {}", orderId, reason);
+    }
+
+    @Transactional
+    public OrderResponse markOrderFailed(Long orderId, String reason) {
+        Order order;
+        if (CommonUtil.isAdmin()) {
+            order = orderRepository.findById(orderId)
+                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+        } else {
+            UserDto currentUser = userClient.getCurrentUser();
+            order = orderRepository.findByOrderIdAndUserId(orderId, currentUser.id())
+                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+        }
+
+        OrderStatus previousStatus = order.getStatus();
+        order.setStatus(OrderStatus.FAILED);
+        Order updatedOrder = orderRepository.save(order);
+
         try {
             OrderTransLog logEntry = new OrderTransLog();
             logEntry.setOrder(updatedOrder);
             logEntry.setFromState(previousStatus);
-            logEntry.setToState(OrderStatus.CANCELLED);
+            logEntry.setToState(OrderStatus.FAILED);
             String actor = "CUSTOMER";
             try {
                 UserDto u = userClient.getCurrentUser();
@@ -401,9 +426,10 @@ public class OrderService {
             logEntry.setCreatedAt(LocalDateTime.now());
             ordTransLogRepository.save(logEntry);
         } catch (Exception e) {
-            log.warn("Failed to record OrderTransLog for rolled back order #{}: {}", orderId, e.getMessage());
+            log.warn("Failed to record OrderTransLog for failed order #{}: {}", orderId, e.getMessage());
         }
 
+        log.warn("Order #{} marked as FAILED. Reason: {}", orderId, reason);
         return mapToEnrichedResponse(updatedOrder);
     }
 
