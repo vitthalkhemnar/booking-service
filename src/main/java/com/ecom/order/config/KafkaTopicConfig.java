@@ -9,9 +9,9 @@ import java.util.function.Consumer;
 
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.config.SslConfigs;
-import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.kafka.autoconfigure.DefaultKafkaConsumerFactoryCustomizer;
 import org.springframework.boot.kafka.autoconfigure.DefaultKafkaProducerFactoryCustomizer;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
@@ -54,7 +54,7 @@ public class KafkaTopicConfig {
 
 	@Bean
 	KafkaAdmin kafkaAdmin(KafkaProperties properties) {
-		Map<String, Object> configs = properties.buildAdminProperties(null);
+		Map<String, Object> configs = properties.buildAdminProperties();
 		applyCaCert(configs::putAll);
 		return new KafkaAdmin(configs);
 	}
