@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.ecom.order.dto.OrderRequest;
@@ -39,6 +40,33 @@ public class OrderController {
     public ResponseEntity<OrderResponse> createOrder(@RequestBody OrderRequest request) {
         OrderResponse createdBooking = orderService.createOrder(request);
         return new ResponseEntity<>(createdBooking, HttpStatus.CREATED);
+    }
+
+    @Tag(name = "Customer Orders", description = "Endpoints for placing orders and viewing personal order history")
+    @Operation(
+        summary = "Confirm order upon successful payment",
+        description = "Transitions an order to CONFIRMED status and triggers the order confirmation email."
+    )
+    @PostMapping("/{orderId}/confirm")
+    public ResponseEntity<OrderResponse> confirmOrder(
+            @Parameter(description = "Unique ID of the order to confirm", required = true)
+            @PathVariable Long orderId) {
+        OrderResponse response = orderService.confirmOrder(orderId);
+        return ResponseEntity.ok(response);
+    }
+
+    @Tag(name = "Customer Orders", description = "Endpoints for placing orders and viewing personal order history")
+    @Operation(
+        summary = "Rollback order upon payment failure or cancellation",
+        description = "Cancels the order, restores reserved warehouse stock, and logs the cancellation."
+    )
+    @PostMapping("/{orderId}/rollback")
+    public ResponseEntity<OrderResponse> rollbackOrder(
+            @Parameter(description = "Unique ID of the order to rollback", required = true)
+            @PathVariable Long orderId,
+            @RequestParam(value = "reason", required = false) String reason) {
+        OrderResponse response = orderService.rollbackOrder(orderId, reason != null ? reason : "Payment failed or cancelled");
+        return ResponseEntity.ok(response);
     }
 
     @Tag(name = "Customer Orders", description = "Endpoints for placing orders and viewing personal order history")

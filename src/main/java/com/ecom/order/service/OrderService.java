@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -260,12 +261,150 @@ public class OrderService {
             log.warn("Failed to create initial OrderTransLog entry for order #{}: {}", savedBooking.getOrderId(), e.getMessage());
         }
 
-        OrderResponse orderResponse = mapToEnrichedResponse(savedBooking);
-        
-        // publishing order placed event
-        orderEventProducer.publishOrderPlacedEvent(new OrderPlacedEvent(orderResponse, currentUser.email()));
+        try {
+            return mapToEnrichedResponse(savedBooking);
+        } catch (Exception enrichmentEx) {
+            log.error("System error during order enrichment for order #{}, marking order as FAILED: {}",
+                    savedBooking.getOrderId(), enrichmentEx.getMessage());
+            savedBooking.setStatus(OrderStatus.FAILED);
+            orderRepository.save(savedBooking);
+            if (!stockDeductionRequests.isEmpty()) {
+                try {
+                    productClient.restoreStock(stockDeductionRequests);
+                } catch (Exception restoreEx) {
+                    log.error("Failed to restore stock after system error: {}", restoreEx.getMessage());
+                }
+            }
+            throw new RuntimeException("System error while finalizing order. Order has been marked as failed.", enrichmentEx);
+        }
+    }
 
-        return orderResponse;
+    @Transactional
+    public OrderResponse confirmOrder(Long orderId) {
+        Order order;
+        if (CommonUtil.isAdmin()) {
+            order = orderRepository.findById(orderId)
+                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+        } else {
+            UserDto currentUser = userClient.getCurrentUser();
+            order = orderRepository.findByOrderIdAndUserId(orderId, currentUser.id())
+                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+        }
+
+        if (order.getStatus() == OrderStatus.CONFIRMED) {
+            log.info("Order #{} is already confirmed. Skipping duplicate confirmation.", orderId);
+            return mapToEnrichedResponse(order);
+        }
+
+        OrderStatus previousStatus = order.getStatus();
+        order.setStatus(OrderStatus.CONFIRMED);
+        Order updatedOrder = orderRepository.save(order);
+
+        try {
+            OrderTransLog logEntry = new OrderTransLog();
+            logEntry.setOrder(updatedOrder);
+            logEntry.setFromState(previousStatus);
+            logEntry.setToState(OrderStatus.CONFIRMED);
+            String actor = "CUSTOMER";
+            try {
+                UserDto u = userClient.getCurrentUser();
+                if (u != null && u.username() != null) actor = u.username();
+            } catch (Exception ignored) {}
+            logEntry.setCreatedBy(actor);
+            logEntry.setCreatedAt(LocalDateTime.now());
+            ordTransLogRepository.save(logEntry);
+        } catch (Exception e) {
+            log.warn("Failed to record OrderTransLog for confirmed order #{}: {}", orderId, e.getMessage());
+        }
+
+        OrderResponse response = mapToEnrichedResponse(updatedOrder);
+
+        // TRIGGER CONFIRMATION EMAIL VIA KAFKA
+        try {
+            String recipientEmail = (response.user() != null && response.user().email() != null)
+                    ? response.user().email()
+                    : userClient.getCurrentUser().email();
+            if (recipientEmail != null && !recipientEmail.isBlank()) {
+                orderEventProducer.publishOrderPlacedEvent(new OrderPlacedEvent(response, recipientEmail));
+                log.info("Triggered order confirmation email for confirmed order #{}", orderId);
+            }
+        } catch (Exception e) {
+            log.error("Failed to publish OrderPlacedEvent for confirmed order #{}: {}", orderId, e.getMessage());
+        }
+
+        return response;
+    }
+
+    @Transactional
+    public OrderResponse rollbackOrder(Long orderId, String reason) {
+        Order order;
+        if (CommonUtil.isAdmin()) {
+            order = orderRepository.findById(orderId)
+                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+        } else {
+            UserDto currentUser = userClient.getCurrentUser();
+            order = orderRepository.findByOrderIdAndUserId(orderId, currentUser.id())
+                    .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+        }
+
+        if (order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.DELIVERED) {
+            log.warn("Order #{} is already confirmed/delivered; cannot rollback directly.", orderId);
+            return mapToEnrichedResponse(order);
+        }
+
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            log.info("Order #{} is already cancelled.", orderId);
+            return mapToEnrichedResponse(order);
+        }
+
+        OrderStatus previousStatus = order.getStatus();
+        order.setStatus(OrderStatus.CANCELLED);
+        Order updatedOrder = orderRepository.save(order);
+
+        // Restore reserved inventory stock
+        if (order.getItems() != null && !order.getItems().isEmpty()) {
+            List<StockUpdateRequest> restoreRequests = order.getItems().stream()
+                    .filter(item -> item.getVariantId() != null && !item.getVariantId().isBlank())
+                    .map(item -> {
+                        try {
+                            Long vId = Long.parseLong(item.getVariantId().trim());
+                            int qty = Integer.parseInt(item.getQuantity().trim());
+                            return new StockUpdateRequest(vId, qty);
+                        } catch (NumberFormatException ignored) {
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .toList();
+
+            if (!restoreRequests.isEmpty()) {
+                try {
+                    productClient.restoreStock(restoreRequests);
+                    log.info("Restored inventory stock for rolled back order #{}: {}", orderId, reason);
+                } catch (Exception e) {
+                    log.error("Failed to restore inventory stock for rolled back order #{}: {}", orderId, e.getMessage());
+                }
+            }
+        }
+
+        try {
+            OrderTransLog logEntry = new OrderTransLog();
+            logEntry.setOrder(updatedOrder);
+            logEntry.setFromState(previousStatus);
+            logEntry.setToState(OrderStatus.CANCELLED);
+            String actor = "CUSTOMER";
+            try {
+                UserDto u = userClient.getCurrentUser();
+                if (u != null && u.username() != null) actor = u.username();
+            } catch (Exception ignored) {}
+            logEntry.setCreatedBy(actor);
+            logEntry.setCreatedAt(LocalDateTime.now());
+            ordTransLogRepository.save(logEntry);
+        } catch (Exception e) {
+            log.warn("Failed to record OrderTransLog for rolled back order #{}: {}", orderId, e.getMessage());
+        }
+
+        return mapToEnrichedResponse(updatedOrder);
     }
 
     private String extractFeignMessage(FeignException e) {
@@ -337,9 +476,6 @@ public class OrderService {
         return switch (status) {
             case CREATED -> "Order Placed";
             case CONFIRMED -> "Order Confirmed";
-            case PAYMENT_PENDING -> "Payment Pending";
-            case PAYMENT_SUCCESS -> "Payment Completed";
-            case PAYMENT_FAILED -> "Payment Failed";
             case DELIVERED -> "Delivered";
             case CANCELLED -> "Order Cancelled";
             case FAILED -> "Order Failed";
@@ -351,9 +487,6 @@ public class OrderService {
         return switch (status) {
             case CREATED -> "Your order has been placed and received by our system.";
             case CONFIRMED -> "Payment has been verified and seller confirmed your order.";
-            case PAYMENT_PENDING -> "Waiting for payment processing and verification.";
-            case PAYMENT_SUCCESS -> "Your payment was successfully received.";
-            case PAYMENT_FAILED -> "Payment was declined or unsuccessful.";
             case DELIVERED -> "Package has been delivered to your delivery address.";
             case CANCELLED -> "This order has been cancelled.";
             case FAILED -> "Processing encountered an issue and order failed.";

@@ -43,8 +43,10 @@ public class OrderStateService {
 			return;
 		}
 
-		// Restore inventory stock if order is transitioning to CANCELLED
-		if (toState == OrderStatus.CANCELLED && currentStatus != OrderStatus.CANCELLED && order.getItems() != null) {
+		// Restore inventory stock if order is transitioning to CANCELLED or FAILED
+		if ((toState == OrderStatus.CANCELLED || toState == OrderStatus.FAILED)
+				&& currentStatus != OrderStatus.CANCELLED && currentStatus != OrderStatus.FAILED
+				&& order.getItems() != null) {
 			List<StockUpdateRequest> restoreRequests = order.getItems().stream()
 					.filter(item -> item.getVariantId() != null && !item.getVariantId().isBlank())
 					.map(item -> {
@@ -62,9 +64,9 @@ public class OrderStateService {
 			if (!restoreRequests.isEmpty()) {
 				try {
 					productClient.restoreStock(restoreRequests);
-					log.info("Successfully restored inventory for cancelled order #{}", order.getOrderId());
+					log.info("Successfully restored inventory for {} order #{}", toState, order.getOrderId());
 				} catch (Exception e) {
-					log.error("Failed to restore inventory for cancelled order #{}: {}", order.getOrderId(), e.getMessage());
+					log.error("Failed to restore inventory for {} order #{}: {}", toState, order.getOrderId(), e.getMessage());
 				}
 			}
 		}
