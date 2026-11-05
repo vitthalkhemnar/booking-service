@@ -283,7 +283,8 @@ public class OrderService {
     @Transactional
     public OrderResponse confirmOrder(Long orderId) {
         Order order;
-        if (CommonUtil.isAdmin()) {
+        String currentUsername = CommonUtil.getCurrentUsername();
+        if (currentUsername == null || CommonUtil.isAdmin()) {
             order = orderRepository.findById(orderId)
                     .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
         } else {
@@ -307,10 +308,14 @@ public class OrderService {
             logEntry.setFromState(previousStatus);
             logEntry.setToState(OrderStatus.CONFIRMED);
             String actor = "CUSTOMER";
-            try {
-                UserDto u = userClient.getCurrentUser();
-                if (u != null && u.username() != null) actor = u.username();
-            } catch (Exception ignored) {}
+            if (currentUsername == null) {
+                actor = "PAYMENT-SERVICE";
+            } else {
+                try {
+                    UserDto u = userClient.getCurrentUser();
+                    if (u != null && u.username() != null) actor = u.username();
+                } catch (Exception ignored) {}
+            }
             logEntry.setCreatedBy(actor);
             logEntry.setCreatedAt(LocalDateTime.now());
             ordTransLogRepository.save(logEntry);
@@ -324,7 +329,12 @@ public class OrderService {
         try {
             String recipientEmail = (response.user() != null && response.user().email() != null)
                     ? response.user().email()
-                    : userClient.getCurrentUser().email();
+                    : null;
+            if (recipientEmail == null && currentUsername != null) {
+                try {
+                    recipientEmail = userClient.getCurrentUser().email();
+                } catch (Exception ignored) {}
+            }
             if (recipientEmail != null && !recipientEmail.isBlank()) {
                 orderEventProducer.publishOrderPlacedEvent(new OrderPlacedEvent(response, recipientEmail));
                 log.info("Triggered order confirmation email for confirmed order #{}", orderId);
@@ -339,7 +349,8 @@ public class OrderService {
     @Transactional
     public void rollbackOrder(Long orderId, String reason) {
         Optional<Order> orderOpt;
-        if (CommonUtil.isAdmin()) {
+        String currentUsername = CommonUtil.getCurrentUsername();
+        if (currentUsername == null || CommonUtil.isAdmin()) {
             orderOpt = orderRepository.findById(orderId);
         } else {
             UserDto currentUser = userClient.getCurrentUser();
